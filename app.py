@@ -1,6 +1,7 @@
 import sys, os, shutil, hashlib
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileSystemModel, QTreeView, QListWidget, QListWidgetItem,
-                             QSplitter, QLabel, QPushButton, QVBoxLayout, QWidget, QHBoxLayout, QFileDialog, QMessageBox, QLineEdit)
+                             QSplitter, QLabel, QPushButton, QVBoxLayout, QWidget, QHBoxLayout, QFileDialog,
+                             QMessageBox, QLineEdit, QComboBox)
 from PyQt5.QtGui import QPixmap, QIcon
 from PyQt5.QtCore import Qt, QSize, QModelIndex, QDir
 from PIL import Image
@@ -47,6 +48,8 @@ class MediaManager(QMainWindow):
 
         self.media_list = QListWidget()
         self.media_list.setIconSize(QSize(128, 128))
+        self.media_list.setResizeMode(QListWidget.Adjust)
+        self.media_list.setViewMode(QListWidget.IconMode)
         self.media_list.itemDoubleClicked.connect(self.open_media)
         right_layout.addWidget(self.media_list)
 
@@ -62,6 +65,26 @@ class MediaManager(QMainWindow):
         btn_bar.addWidget(self.btn_back)
         right_layout.addLayout(btn_bar)
 
+        # View and Sort Controls
+        view_sort_layout = QHBoxLayout()
+        self.view_mode_combo = QComboBox()
+        self.view_mode_combo.addItems([
+            "Extra Large Icons", "Large Icons", "Medium Icons", "Small Icons",
+            "List", "Details"
+        ])
+        self.view_mode_combo.currentIndexChanged.connect(self.change_view_mode)
+
+        self.sort_mode_combo = QComboBox()
+        self.sort_mode_combo.addItems(["Name Asc", "Name Desc", "Date Asc", "Date Desc"])
+        self.sort_mode_combo.currentIndexChanged.connect(self.sort_media_list)
+
+        view_sort_layout.addWidget(QLabel("View:"))
+        view_sort_layout.addWidget(self.view_mode_combo)
+        view_sort_layout.addWidget(QLabel("Sort:"))
+        view_sort_layout.addWidget(self.sort_mode_combo)
+
+        right_layout.addLayout(view_sort_layout)
+
         right_panel.setLayout(right_layout)
         splitter.addWidget(right_panel)
 
@@ -71,6 +94,7 @@ class MediaManager(QMainWindow):
         self.last_deleted = []
         self.previous_indexes = []
         self.current_folder = QDir.rootPath()
+        self.media_files = []
         self.apply_dark_theme()
 
     def on_folder_selected(self, index):
@@ -106,31 +130,9 @@ class MediaManager(QMainWindow):
 
             ext = os.path.splitext(filename)[1].lower()
             if ext in SUPPORTED_IMAGE_EXT + SUPPORTED_VIDEO_EXT:
-                item = QListWidgetItem()
-                item.setText(filename)
-                item.setToolTip(full_path)
-                item.setData(Qt.UserRole, full_path)
-
-                if ext in SUPPORTED_IMAGE_EXT:
-                    pixmap = QPixmap(full_path)
-                    if not pixmap.isNull():
-                        item.setIcon(QIcon(pixmap.scaled(128, 128, Qt.KeepAspectRatio)))
-
-                elif ext in SUPPORTED_VIDEO_EXT:
-                    cap = cv2.VideoCapture(full_path)
-                    if cap.isOpened():
-                        ret, frame = cap.read()
-                        if ret and frame is not None:
-                            thumbnail_path = full_path + '_thumb.jpg'
-                            cv2.imwrite(thumbnail_path, frame)
-                            pixmap = QPixmap(thumbnail_path)
-                            if not pixmap.isNull():
-                                item.setIcon(QIcon(pixmap.scaled(128, 128, Qt.KeepAspectRatio)))
-                            os.remove(thumbnail_path)
-                        cap.release()
-
-                self.media_list.addItem(item)
                 self.media_files.append(full_path)
+
+        self.sort_media_list()
 
     def search_files(self):
         query = self.search_input.text().lower()
@@ -138,33 +140,38 @@ class MediaManager(QMainWindow):
             self.populate_media_list(self.current_folder)
             return
 
+        filtered_files = [f for f in self.media_files if query in os.path.basename(f).lower()]
+        self.display_files(filtered_files)
+
+    def display_files(self, files):
         self.media_list.clear()
-        for path in self.media_files:
-            if query in os.path.basename(path).lower():
-                item = QListWidgetItem()
-                item.setText(os.path.basename(path))
-                item.setToolTip(path)
-                item.setData(Qt.UserRole, path)
-                ext = os.path.splitext(path)[1].lower()
+        icon_size = self.media_list.iconSize()
 
-                if ext in SUPPORTED_IMAGE_EXT:
-                    pixmap = QPixmap(path)
-                    if not pixmap.isNull():
-                        item.setIcon(QIcon(pixmap.scaled(128, 128, Qt.KeepAspectRatio)))
-                elif ext in SUPPORTED_VIDEO_EXT:
-                    cap = cv2.VideoCapture(path)
-                    if cap.isOpened():
-                        ret, frame = cap.read()
-                        if ret and frame is not None:
-                            thumbnail_path = path + '_thumb.jpg'
-                            cv2.imwrite(thumbnail_path, frame)
-                            pixmap = QPixmap(thumbnail_path)
-                            if not pixmap.isNull():
-                                item.setIcon(QIcon(pixmap.scaled(128, 128, Qt.KeepAspectRatio)))
-                            os.remove(thumbnail_path)
-                        cap.release()
+        for path in files:
+            ext = os.path.splitext(path)[1].lower()
+            item = QListWidgetItem()
+            item.setText(os.path.basename(path))
+            item.setToolTip(path)
+            item.setData(Qt.UserRole, path)
 
-                self.media_list.addItem(item)
+            if ext in SUPPORTED_IMAGE_EXT:
+                pixmap = QPixmap(path)
+                if not pixmap.isNull():
+                    item.setIcon(QIcon(pixmap.scaled(icon_size, Qt.KeepAspectRatio)))
+            elif ext in SUPPORTED_VIDEO_EXT:
+                cap = cv2.VideoCapture(path)
+                if cap.isOpened():
+                    ret, frame = cap.read()
+                    if ret and frame is not None:
+                        thumb_path = path + "_thumb.jpg"
+                        cv2.imwrite(thumb_path, frame)
+                        pixmap = QPixmap(thumb_path)
+                        if not pixmap.isNull():
+                            item.setIcon(QIcon(pixmap.scaled(icon_size, Qt.KeepAspectRatio)))
+                        os.remove(thumb_path)
+                    cap.release()
+
+            self.media_list.addItem(item)
 
     def open_media(self, item):
         path = item.data(Qt.UserRole)
@@ -187,6 +194,7 @@ class MediaManager(QMainWindow):
             shutil.move(deleted, original)
         self.last_deleted.clear()
         QMessageBox.information(self, "Undo", "Restored deleted files.")
+        self.populate_media_list(self.current_folder)
 
     def apply_dark_theme(self):
         self.setStyleSheet("""
@@ -195,7 +203,39 @@ class MediaManager(QMainWindow):
             QListWidget { background-color: #1e1e1e; color: white; }
             QTreeView { background-color: #1e1e1e; color: white; }
             QLineEdit { background-color: #333; color: white; padding: 4px; }
+            QComboBox { background-color: #333; color: white; }
+            QLabel { color: white; }
         """)
+
+    def change_view_mode(self):
+        mode = self.view_mode_combo.currentText()
+        size_map = {
+            "Extra Large Icons": 256,
+            "Large Icons": 128,
+            "Medium Icons": 64,
+            "Small Icons": 32
+        }
+
+        if mode in size_map:
+            self.media_list.setViewMode(QListWidget.IconMode)
+            self.media_list.setIconSize(QSize(size_map[mode], size_map[mode]))
+        elif mode == "List" or mode == "Details":
+            self.media_list.setViewMode(QListWidget.ListMode)
+
+        self.display_files(self.media_files)
+
+    def sort_media_list(self):
+        sort_mode = self.sort_mode_combo.currentText()
+
+        def get_key(path):
+            if "Date" in sort_mode:
+                return os.path.getmtime(path)
+            return os.path.basename(path).lower()
+
+        reverse = "Desc" in sort_mode
+        self.media_files.sort(key=get_key, reverse=reverse)
+
+        self.display_files(self.media_files)
 
     def find_duplicates(self):
         hashes = {}
