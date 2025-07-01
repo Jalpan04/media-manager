@@ -2,8 +2,8 @@ import sys, os, shutil, hashlib
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QFileSystemModel, QTreeView, QListWidget, QListWidgetItem,
                              QSplitter, QLabel, QPushButton, QVBoxLayout, QWidget, QHBoxLayout, QFileDialog,
                              QMessageBox, QLineEdit, QComboBox)
-from PyQt5.QtGui import QPixmap, QIcon
-from PyQt5.QtCore import Qt, QSize, QModelIndex, QDir
+from PyQt5.QtGui import QPixmap, QIcon, QImage, QDragEnterEvent, QDropEvent
+from PyQt5.QtCore import Qt, QSize, QModelIndex, QDir, QMimeData
 from PIL import Image
 import imagehash
 import cv2
@@ -18,6 +18,8 @@ class MediaManager(QMainWindow):
         self.setWindowTitle("Personal Media Manager")
         self.setGeometry(100, 100, 1200, 700)
         self.dark_mode = True
+
+        self.setAcceptDrops(True)
 
         splitter = QSplitter(self)
         self.setCentralWidget(splitter)
@@ -60,9 +62,13 @@ class MediaManager(QMainWindow):
         self.btn_undo.clicked.connect(self.undo_delete)
         self.btn_back = QPushButton("Back")
         self.btn_back.clicked.connect(self.go_back)
+        self.btn_find_duplicates = QPushButton("Find Duplicates")
+        self.btn_find_duplicates.clicked.connect(self.show_duplicates)
+
         btn_bar.addWidget(self.btn_delete)
         btn_bar.addWidget(self.btn_undo)
         btn_bar.addWidget(self.btn_back)
+        btn_bar.addWidget(self.btn_find_duplicates)
         right_layout.addLayout(btn_bar)
 
         # View and Sort Controls
@@ -91,11 +97,22 @@ class MediaManager(QMainWindow):
         if not os.path.exists(RECYCLE_BIN):
             os.makedirs(RECYCLE_BIN)
 
-        self.last_deleted = []
+        self.last_deleted_stack = []
         self.previous_indexes = []
         self.current_folder = QDir.rootPath()
         self.media_files = []
         self.apply_dark_theme()
+
+    def dragEnterEvent(self, event: QDragEnterEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QDropEvent):
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if os.path.isdir(path):
+                self.current_folder = path
+                self.populate_media_list(path)
 
     def on_folder_selected(self, index):
         folder_path = self.dir_model.filePath(index)
@@ -163,12 +180,11 @@ class MediaManager(QMainWindow):
                 if cap.isOpened():
                     ret, frame = cap.read()
                     if ret and frame is not None:
-                        thumb_path = path + "_thumb.jpg"
-                        cv2.imwrite(thumb_path, frame)
-                        pixmap = QPixmap(thumb_path)
-                        if not pixmap.isNull():
-                            item.setIcon(QIcon(pixmap.scaled(icon_size, Qt.KeepAspectRatio)))
-                        os.remove(thumb_path)
+                        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        h, w, ch = frame.shape
+                        qimg = QImage(frame.data, w, h, ch * w, QImage.Format_RGB888)
+                        pixmap = QPixmap.fromImage(qimg)
+                        item.setIcon(QIcon(pixmap.scaled(icon_size, Qt.KeepAspectRatio)))
                     cap.release()
 
             self.media_list.addItem(item)
@@ -181,20 +197,25 @@ class MediaManager(QMainWindow):
         selected = self.media_list.selectedItems()
         if not selected:
             return
+
+        deleted_batch = []
         for item in selected:
             path = item.data(Qt.UserRole)
             filename = os.path.basename(path)
             dest = os.path.join(RECYCLE_BIN, filename)
             shutil.move(path, dest)
-            self.last_deleted.append((path, dest))
+            deleted_batch.append((path, dest))
             self.media_list.takeItem(self.media_list.row(item))
 
+        self.last_deleted_stack.append(deleted_batch)
+
     def undo_delete(self):
-        for original, deleted in self.last_deleted:
-            shutil.move(deleted, original)
-        self.last_deleted.clear()
-        QMessageBox.information(self, "Undo", "Restored deleted files.")
-        self.populate_media_list(self.current_folder)
+        if self.last_deleted_stack:
+            last_batch = self.last_deleted_stack.pop()
+            for original, deleted in last_batch:
+                shutil.move(deleted, original)
+            QMessageBox.information(self, "Undo", "Restored deleted files.")
+            self.populate_media_list(self.current_folder)
 
     def apply_dark_theme(self):
         self.setStyleSheet("""
@@ -249,6 +270,18 @@ class MediaManager(QMainWindow):
                 else:
                     hashes[h] = path
         return duplicates
+
+    def show_duplicates(self):
+        duplicates = self.find_duplicates()
+        if not duplicates:
+            QMessageBox.information(self, "Duplicates", "No duplicate images found.")
+            return
+
+        msg = "Duplicate Images Found:\n\n"
+        for original, duplicate in duplicates:
+            msg += f"Original: {original}\nDuplicate: {duplicate}\n\n"
+
+        QMessageBox.information(self, "Duplicates", msg)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
