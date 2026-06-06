@@ -1,5 +1,7 @@
 # Personal Media Manager
 
+![GitHub top language](https://img.shields.io/github/languages/top/Jalpan04/media-manager) ![GitHub repo size](https://img.shields.io/github/repo-size/Jalpan04/media-manager) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Personal Media Manager is a desktop application built with Python and PyQt5 that helps you organize, search, and manage your image and video collections. It provides a visual folder browser, thumbnail previews, duplicate image detection, sorting capabilities, and a soft-deletion recycling system.
 
 ## Features
